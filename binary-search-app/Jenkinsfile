@@ -1,0 +1,58 @@
+pipeline {
+    agent any
+
+    triggers {
+        // Poll SCM every 2 minutes
+        pollSCM('H/2 * * * *')
+    }
+
+    environment {
+        IMAGE_NAME = 'binary-search-app:latest'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Test') {
+            steps {
+                bat 'python -m unittest test_binary_search.py'
+                // Use 'sh' instead of 'bat' if Jenkins runs in WSL / Linux container:
+                // sh 'python3 -m unittest test_binary_search.py'
+            }
+        }
+
+        stage('Build Image for Minikube') {
+            steps {
+                // Point Windows Docker CLI to Minikube's Docker daemon
+                bat '''
+                    @echo off
+                    FOR /F "tokens=*" %%i IN ('minikube docker-env --shell cmd') DO %%i
+                    docker build -t %IMAGE_NAME% .
+                '''
+                // For Linux/WSL/Bash Jenkins:
+                // sh '''
+                //     eval $(minikube docker-env)
+                //     docker build -t $IMAGE_NAME .
+                // '''
+            }
+        }
+
+        stage('Deploy to Minikube') {
+            steps {
+                bat 'kubectl apply -f k8s/deployment.yaml'
+                bat 'kubectl rollout restart deployment/binary-search-deployment'
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                bat 'kubectl rollout status deployment/binary-search-deployment --timeout=60s'
+                bat 'kubectl get pods -l app=binary-search'
+            }
+        }
+    }
+}
